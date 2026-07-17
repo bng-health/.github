@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/bng-health/.github/main/profile/assets/cover.png" alt="BNG Hub — Building Network for Growth" width="100%" />
 </p>
 
-<h1 align="center">BNG Health Tech</h1>
+<h1 align="center">BNG Hub</h1>
 
 <p align="center">
   <strong>Building Network for Growth</strong><br />
@@ -22,9 +22,9 @@
 </p>
 
 <p align="center">
-  <a href="https://boasnovasgestao.com"><img src="https://img.shields.io/badge/Site-boasnovasgestao.com-2323C6?logo=googlechrome&logoColor=white" alt="Site" /></a>
+  <a href="https://bnghub.com.br"><img src="https://img.shields.io/badge/Site-bnghub.com.br-2323C6?logo=googlechrome&logoColor=white" alt="Site" /></a>
 </p>
 
 <p align="center">
-  <sub>© BNG Health Tech · Boas Novas Gestão · Feito com 💙 no Brasil</sub>
+  <sub>© BNG Hub · Boas Novas Gestão · Feito com 💙 no Brasil</sub>
 </p>
