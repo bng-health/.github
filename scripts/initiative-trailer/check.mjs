@@ -1,0 +1,172 @@
+// initiative-trailer: checks the `Initiative:` trailer at the end of a PR body.
+// Zero dependencies (Node >= 18). Tests: node --test (from the repo root)
+// This file is inlined in .github/workflows/initiative-trailer.yml; a test
+// fails if the two copies drift apart.
+import { appendFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const TRAILER_RE = /^(initiative|initiative-ledger)[ \t]*:[ \t]*(.*)$/i;
+const NONE_RE = /^none[ \t]*\([ \t]*([^()]*?)[ \t]*\)$/i;
+const CODE = '\u0000code';
+// Lines allowed AFTER the trailer: blank, other `Key: value` trailers
+// (Co-Authored-By, Claude-Session...), bare URLs and the "🤖 Generated" footer.
+const FOOTER_OK = [/^$/, /^[A-Za-z][A-Za-z0-9-]*:[ \t]+\S/, /^<?https?:\/\/\S+>?$/, /^🤖/u];
+
+export function bodyLines(body) {
+  const text = String(body ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+  const out = [];
+  let fence = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const m = line.match(/^(`{3,}|~{3,})/);
+    if (fence) {
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && line === m[1]) fence = null;
+      out.push(CODE);
+    } else if (m) {
+      fence = m[1];
+      out.push(CODE);
+    } else {
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+export function findTrailer(body) {
+  const lines = bodyLines(body);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    const m = line.match(TRAILER_RE);
+    if (m) return { key: m[1].toLowerCase(), value: m[2].trim(), raw: line };
+    if (!FOOTER_OK.some((re) => re.test(line))) return null;
+  }
+  return null;
+}
+
+export function validate(trailer) {
+  const { key, value } = trailer;
+  const label = key === 'initiative-ledger' ? 'Initiative-Ledger' : 'Initiative';
+  if (!value) return { ok: false, reason: `a linha \`${label}:\` está vazia` };
+  if (key === 'initiative') {
+    if (/^none\b/i.test(value)) {
+      const m = value.match(NONE_RE);
+      if (m && m[1]) return { ok: true, kind: 'none', motivo: m[1] };
+      return { ok: false, reason: '`none` exige um motivo entre parênteses, ex.: `Initiative: none (deps)`' };
+    }
+  }
+  if (SLUG_RE.test(value)) return { ok: true, kind: key === 'initiative-ledger' ? 'ledger' : 'slug', slug: value };
+  return {
+    ok: false,
+    reason: `\`${value}\` não é um slug válido (kebab-case: minúsculas, números e hífen, ex.: \`processo-dev-v04\`)`,
+  };
+}
+
+export function isBot(login, type) {
+  return type === 'Bot' || /\[bot\]$/i.test(String(login ?? ''));
+}
+
+const HOW_TO_FIX = [
+  'Como corrigir: edite a descrição do PR e coloque, como **última linha**, uma destas:',
+  '',
+  '```',
+  'Initiative: <slug-da-iniciativa>',
+  'Initiative: none (<motivo>)',
+  'Initiative-Ledger: <slug-da-iniciativa>',
+  '```',
+  '',
+  '- `<slug>` é o nome em kebab-case do ledger da iniciativa (ex.: `processo-dev-v04`).',
+  '- `none (<motivo>)` para PR sem iniciativa; motivos usuais: `drfc`, `infra`, `deps`.',
+  '- `Initiative-Ledger:` para PR que só mexe no ledger da iniciativa.',
+  '- Depois da linha só podem vir linhas em branco, outros trailers (`Chave: valor`) ou o rodapé do Claude Code.',
+  '- Salvar a descrição roda o check de novo (ou use "Re-run": o check relê a descrição atual).',
+].join('\n');
+
+export function evaluate({ body, author, authorType, mode = 'warn' }) {
+  if (mode !== 'warn' && mode !== 'require') {
+    return { status: 'config', exitCode: 1, level: 'error', title: 'initiative-trailer', message: `input mode inválido: \`${mode}\` (use warn ou require)` };
+  }
+  if (isBot(author, authorType)) {
+    return { status: 'bot', exitCode: 0, level: 'notice', title: 'Initiative', message: `autor ${author} é bot: isento do trailer` };
+  }
+  const trailer = findTrailer(body);
+  if (trailer) {
+    const v = validate(trailer);
+    if (v.ok) {
+      const what = v.kind === 'none' ? `none (${v.motivo})` : v.kind === 'ledger' ? `ledger de ${v.slug}` : v.slug;
+      return { status: 'ok', exitCode: 0, level: 'notice', title: 'Initiative', message: `trailer ok: ${what}`, trailer: v };
+    }
+    return fail(mode, 'invalid', `trailer inválido: ${v.reason}.`);
+  }
+  return fail(mode, 'missing', 'falta a linha `Initiative:` ao fim da descrição do PR (fora de blocos de código).');
+}
+
+function fail(mode, status, message) {
+  const require = mode === 'require';
+  return {
+    status,
+    exitCode: require ? 1 : 0,
+    level: require ? 'error' : 'warning',
+    title: require ? 'Initiative: obrigatório' : 'Initiative: aviso (ainda não bloqueia)',
+    message,
+    howToFix: HOW_TO_FIX,
+  };
+}
+
+function esc(s, prop = false) {
+  let r = String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+  if (prop) r = r.replace(/:/g, '%3A').replace(/,/g, '%2C');
+  return r;
+}
+
+export function annotation(result) {
+  return `::${result.level} title=${esc(result.title, true)}::${esc(result.message)}`;
+}
+
+export function summary(result, mode) {
+  const icon = { ok: '✅', bot: '🤖', missing: mode === 'require' ? '❌' : '⚠️', invalid: mode === 'require' ? '❌' : '⚠️', config: '❌' }[result.status] ?? 'ℹ️';
+  const parts = [`### ${icon} Initiative trailer (modo \`${mode}\`)`, '', result.message];
+  if (result.howToFix) {
+    if (mode === 'warn') parts.push('', '> Em modo `warn` este check não bloqueia o merge, mas a partir da ativação do modo `require` o PR fica bloqueado sem a linha.');
+    parts.push('', result.howToFix);
+  }
+  return parts.join('\n') + '\n';
+}
+
+export async function loadPr(env, fetchImpl = globalThis.fetch) {
+  const pr = { body: env.PR_BODY ?? '', author: env.PR_AUTHOR ?? '', authorType: env.PR_AUTHOR_TYPE ?? '', source: 'event' };
+  if (!env.GITHUB_TOKEN || !env.REPO || !env.PR_NUMBER || !fetchImpl) return pr;
+  try {
+    const api = env.GITHUB_API_URL || 'https://api.github.com';
+    const res = await fetchImpl(`${api}/repos/${env.REPO}/pulls/${env.PR_NUMBER}`, {
+      headers: { authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return { body: data.body ?? '', author: data.user?.login ?? pr.author, authorType: data.user?.type ?? pr.authorType, source: 'api' };
+  } catch (err) {
+    return { ...pr, fetchError: String(err?.message ?? err) };
+  }
+}
+
+export async function main(env = process.env, io = {}) {
+  const out = io.out ?? ((s) => process.stdout.write(s + '\n'));
+  const summaryFile = io.summaryFile ?? env.GITHUB_STEP_SUMMARY;
+  const mode = (env.MODE || 'warn').trim().toLowerCase();
+  if (!env.PR_NUMBER) {
+    out('::notice title=Initiative::evento sem pull request, nada a checar');
+    return 0;
+  }
+  const pr = await loadPr(env, io.fetch);
+  if (pr.fetchError) out(`::warning title=Initiative::não consegui ler o PR pela API (${esc(pr.fetchError)}); usando o corpo do evento`);
+  const result = evaluate({ ...pr, mode });
+  out(annotation(result));
+  if (summaryFile) appendFileSync(summaryFile, summary(result, mode));
+  return result.exitCode;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().then((code) => process.exit(code));
+}

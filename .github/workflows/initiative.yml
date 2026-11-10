@@ -1,0 +1,15 @@
+# Dogfood: este próprio repo usa o workflow reutilizável em modo warn.
+name: initiative
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  initiative:
+    uses: ./.github/workflows/initiative-trailer.yml
+    with:
+      mode: warn

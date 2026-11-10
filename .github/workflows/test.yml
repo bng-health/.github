@@ -1,0 +1,23 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  node-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Testes do initiative-trailer
+        run: node --test
+      - name: Workflow em sincronia com check.mjs
+        run: node scripts/initiative-trailer/sync.mjs --check
