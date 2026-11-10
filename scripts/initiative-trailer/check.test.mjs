@@ -152,6 +152,67 @@ test('CLI real: exit codes do processo', () => {
   assert.equal(run({ ...base, MODE: 'require', PR_BODY: 'x\n\nInitiative: none (drfc)' }).status, 0);
 });
 
+test('Work-Type: cada valor passa, sem ref', () => {
+  for (const t of ['fix', 'incidente', 'infra', 'dados', 'seguranca', 'deps', 'chore']) {
+    const r = ev(`Resumo\n\nWork-Type: ${t}`);
+    assert.equal(r.status, 'ok', t);
+    assert.deepEqual([r.trailer.kind, r.trailer.tipo, r.trailer.ref], ['work-type', t, null]);
+    assert.equal(r.message, `trailer ok: work-type ${t}`);
+  }
+});
+
+test('Work-Type: case-insensitive e segurança vira seguranca', () => {
+  assert.equal(ev('x\n\nwork-type: FIX').trailer.tipo, 'fix');
+  assert.equal(ev('x\n\nWORK-TYPE: Chore').status, 'ok');
+  const r = ev('x\n\nWork-Type: Segurança');
+  assert.equal(r.status, 'ok');
+  assert.equal(r.trailer.tipo, 'seguranca');
+});
+
+test('Work-Type: formas de ref (#n, owner/repo#n, URL de issue/PR)', () => {
+  const refs = ['#123', 'bng-health/linkcare#2072', 'https://github.com/bng-health/linkcare/issues/9', 'https://github.com/bng-health/linkcare/pull/10'];
+  for (const ref of refs) {
+    const r = ev(`x\n\nWork-Type: fix ${ref}`);
+    assert.equal(r.status, 'ok', ref);
+    assert.equal(r.trailer.ref, ref);
+  }
+  assert.equal(ev('x\n\nWork-Type: fix #123').message, 'trailer ok: work-type fix (#123)');
+});
+
+test('Work-Type: ref malformada é inválida', () => {
+  for (const ref of ['123', '#', '#abc', 'owner/repo', 'https://example.com/a/b/issues/1', '#1 #2', 'foo bar']) {
+    assert.equal(ev(`x\n\nWork-Type: fix ${ref}`).status, 'invalid', ref);
+  }
+});
+
+test('Work-Type: valor inválido lista os valores aceitos; vazio é inválido', () => {
+  const r = ev('x\n\nWork-Type: feature');
+  assert.equal(r.status, 'invalid');
+  assert.match(r.message, /fix\|incidente\|infra\|dados\|seguranca\|deps\|chore|fix, incidente, infra, dados, seguranca, deps, chore/);
+  assert.equal(ev('x\n\nWork-Type:').status, 'invalid');
+  assert.equal(ev('x\n\nWork-Type:   ').status, 'invalid');
+  assert.match(ev('x\n\nWork-Type:').message, /Work-Type/);
+});
+
+test('Work-Type seguido de rodapé do Claude Code e outros trailers passa', () => {
+  assert.equal(ev(`Resumo\n\nWork-Type: fix #5\n\n${CLAUDE_FOOTER}`).status, 'ok');
+  assert.equal(ev('x\n\nWork-Type: deps\nCo-Authored-By: Fulano <f@x.com>\n').status, 'ok');
+});
+
+test('Work-Type dentro de bloco de código é ignorado; fora do fim não conta', () => {
+  assert.equal(ev('Exemplo:\n\n```\nWork-Type: fix\n```').status, 'missing');
+  assert.equal(ev('Work-Type: fix\n\n## Resumo\nMuda o digest.').status, 'missing');
+});
+
+test('Work-Type: require sai 0 quando válido, 1 quando inválido', () => {
+  assert.equal(ev('x\n\nWork-Type: infra', { mode: 'require' }).exitCode, 0);
+  assert.equal(ev('x\n\nWork-Type: nada', { mode: 'require' }).exitCode, 1);
+});
+
+test('mensagens de correção citam Work-Type', () => {
+  assert.match(ev('sem trailer').howToFix, /Work-Type: <tipo>/);
+});
+
 test('workflow contém a cópia atual do check.mjs', () => {
   const wf = readFileSync(WORKFLOW_PATH, 'utf8');
   const script = readFileSync(SCRIPT_PATH, 'utf8');

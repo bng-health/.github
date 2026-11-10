@@ -6,7 +6,10 @@ import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const TRAILER_RE = /^(initiative|initiative-ledger)[ \t]*:[ \t]*(.*)$/i;
+const TRAILER_RE = /^(initiative|initiative-ledger|work-type)[ \t]*:[ \t]*(.*)$/i;
+export const WORK_TYPES = ['fix', 'incidente', 'infra', 'dados', 'seguranca', 'deps', 'chore'];
+// Optional issue ref after the type: #n, owner/repo#n or a GitHub issue/PR URL.
+const REF_RE = /^(?:#\d+|[\w.-]+\/[\w.-]+#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)$/;
 const NONE_RE = /^none[ \t]*\([ \t]*([^()]*?)[ \t]*\)$/i;
 const CODE = '\u0000code';
 // Lines allowed AFTER the trailer: blank, other `Key: value` trailers
@@ -48,8 +51,9 @@ export function findTrailer(body) {
 
 export function validate(trailer) {
   const { key, value } = trailer;
-  const label = key === 'initiative-ledger' ? 'Initiative-Ledger' : 'Initiative';
+  const label = { 'initiative-ledger': 'Initiative-Ledger', 'work-type': 'Work-Type' }[key] ?? 'Initiative';
   if (!value) return { ok: false, reason: `a linha \`${label}:\` está vazia` };
+  if (key === 'work-type') return validateWorkType(value);
   if (key === 'initiative') {
     if (/^none\b/i.test(value)) {
       const m = value.match(NONE_RE);
@@ -64,6 +68,19 @@ export function validate(trailer) {
   };
 }
 
+function validateWorkType(value) {
+  const [first, ...rest] = value.split(/[ \t]+/);
+  const tipo = first.toLowerCase().replace(/ç/g, 'c').replace(/ã/g, 'a');
+  if (!WORK_TYPES.includes(tipo)) {
+    return { ok: false, reason: `\`${first}\` não é um tipo de Work-Type válido (use ${WORK_TYPES.join(', ')})` };
+  }
+  const ref = rest.join(' ');
+  if (ref && !REF_RE.test(ref)) {
+    return { ok: false, reason: `\`${ref}\` não é uma referência válida (use \`#123\`, \`owner/repo#123\` ou a URL da issue/PR)` };
+  }
+  return { ok: true, kind: 'work-type', tipo, ref: ref || null };
+}
+
 export function isBot(login, type) {
   return type === 'Bot' || /\[bot\]$/i.test(String(login ?? ''));
 }
@@ -75,11 +92,13 @@ const HOW_TO_FIX = [
   'Initiative: <slug-da-iniciativa>',
   'Initiative: none (<motivo>)',
   'Initiative-Ledger: <slug-da-iniciativa>',
+  'Work-Type: <fix|incidente|infra|dados|seguranca|deps|chore> [#123]',
   '```',
   '',
   '- `<slug>` é o nome em kebab-case do ledger da iniciativa (ex.: `processo-dev-v04`).',
   '- `none (<motivo>)` para PR sem iniciativa; motivos usuais: `drfc`, `infra`, `deps`.',
   '- `Initiative-Ledger:` para PR que só mexe no ledger da iniciativa.',
+  '- `Work-Type: <tipo>` para trabalho fora de iniciativa (correção, incidente, infra, dados, segurança, dependências, chore), opcionalmente seguido da issue (`#123`, `owner/repo#123` ou URL).',
   '- Depois da linha só podem vir linhas em branco, outros trailers (`Chave: valor`) ou o rodapé do Claude Code.',
   '- Salvar a descrição roda o check de novo (ou use "Re-run": o check relê a descrição atual).',
 ].join('\n');
@@ -95,12 +114,12 @@ export function evaluate({ body, author, authorType, mode = 'warn' }) {
   if (trailer) {
     const v = validate(trailer);
     if (v.ok) {
-      const what = v.kind === 'none' ? `none (${v.motivo})` : v.kind === 'ledger' ? `ledger de ${v.slug}` : v.slug;
+      const what = v.kind === 'work-type' ? `work-type ${v.tipo}${v.ref ? ` (${v.ref})` : ''}` : v.kind === 'none' ? `none (${v.motivo})` : v.kind === 'ledger' ? `ledger de ${v.slug}` : v.slug;
       return { status: 'ok', exitCode: 0, level: 'notice', title: 'Initiative', message: `trailer ok: ${what}`, trailer: v };
     }
     return fail(mode, 'invalid', `trailer inválido: ${v.reason}.`);
   }
-  return fail(mode, 'missing', 'falta a linha `Initiative:` ao fim da descrição do PR (fora de blocos de código).');
+  return fail(mode, 'missing', 'falta a linha `Initiative:` (ou `Work-Type:`) ao fim da descrição do PR (fora de blocos de código).');
 }
 
 function fail(mode, status, message) {

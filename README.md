@@ -16,7 +16,12 @@ Todo PR termina com uma linha que liga o PR a uma iniciativa do board #20:
 Initiative: <slug>            # slug do ledger, kebab-case (ex.: processo-dev-v04)
 Initiative: none (<motivo>)   # sem iniciativa; motivos usuais: drfc, infra, deps
 Initiative-Ledger: <slug>     # PR que só mexe no ledger da iniciativa
+Work-Type: <tipo> [<ref>]     # trabalho fora de iniciativa; tipo: fix|incidente|infra|dados|seguranca|deps|chore
 ```
+
+`Work-Type:` é aceito onde `Initiative:` é aceito. O `<tipo>` não diferencia maiúsculas (`segurança` vale como `seguranca`) e pode vir seguido de uma referência opcional à issue: `#123`, `owner/repo#123` ou a URL da issue/PR (ex.: `Work-Type: fix #123`). Tipo fora da lista ou referência malformada é inválido. Só `Initiative:` dispara o anúncio de release; `Work-Type:` nunca.
+
+> Quem chama o workflow com `@v1` continua com o comportamento antigo (sem `Work-Type:`) até a tag ser movida ou uma nova ser publicada.
 
 Regras do check:
 
